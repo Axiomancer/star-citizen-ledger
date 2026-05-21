@@ -1,0 +1,13 @@
+{
+  "name": "game-ledger",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "pnpm --parallel -r dev",
+    "build": "pnpm -r build",
+    "start": "pnpm --parallel -r start"
+  },
+  "pnpm": {
+    "overrides": {}
+  }
+}

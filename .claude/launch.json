@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "client",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["C:\\Users\\axiom\\Documents\\SC Inventory App\\client\\node_modules\\vite\\bin\\vite.js"],
+      "cwd": "C:\\Users\\axiom\\Documents\\SC Inventory App\\client",
+      "port": 5173
+    }
+  ]
+}
