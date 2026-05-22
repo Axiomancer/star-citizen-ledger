@@ -108,6 +108,7 @@ export const inventoryApi = {
   list: (params?: Record<string, unknown>) => get('/inventory', params),
   create: (d: unknown) => post('/inventory', d),
   adjust: (id: number, d: unknown) => post(`/inventory/${id}/adjust`, d),
+  sell: (id: number, d: unknown) => post(`/inventory/${id}/sell`, d),
   getTransactions: (id: number) => get(`/inventory/${id}/transactions`),
   update: (id: number, d: unknown) => put(`/inventory/${id}`, d),
   remove: (id: number) => del(`/inventory/${id}`),

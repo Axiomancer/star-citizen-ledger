@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db';
+import { inventoryOut } from '../lib/inventory';
 
 const router = Router();
 
@@ -30,6 +31,14 @@ router.post('/', async (req, res) => {
         const sold = await db.get('SELECT COALESCE(SUM(quantity_sold),0) as t FROM sales WHERE trading_entry_id = ?', [tradingEntryId]);
         const status = (sold?.t ?? 0) >= te.quantity_bought ? 'sold' : 'partial';
         await db.run('UPDATE trading_entries SET status = ? WHERE id = ?', [status, tradingEntryId]);
+      }
+    }
+
+    // Auto-reduce inventory for the commodity sold
+    if (runId) {
+      const run = await db.get('SELECT game_id FROM runs WHERE id = ?', [runId]);
+      if (run) {
+        await inventoryOut(run.game_id, commodity, quantitySold, runId, `Sold: ${commodity}`);
       }
     }
 

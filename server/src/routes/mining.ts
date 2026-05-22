@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db';
+import { inventoryIn } from '../lib/inventory';
 
 const router = Router();
 
@@ -34,7 +35,13 @@ router.get('/run/:runId', async (req, res) => {
       }
     }
 
-    res.json({ entries, refiningJobs, sales });
+    // Also include direct sales (not linked to a refining job) for this run
+    const directSales = await db.all(
+      'SELECT * FROM sales WHERE run_id = ? AND refining_job_id IS NULL ORDER BY sold_at DESC',
+      [req.params.runId]
+    );
+
+    res.json({ entries, refiningJobs, sales: [...sales, ...directSales] });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -48,6 +55,13 @@ router.post('/entries', async (req, res) => {
       'INSERT INTO mining_entries (run_id, raw_material, quantity_raw, location, notes) VALUES (?, ?, ?, ?, ?)',
       [runId, rawMaterial, quantityRaw, location ?? null, notes ?? null]
     );
+
+    // Auto-track in inventory
+    const run = await db.get('SELECT game_id FROM runs WHERE id = ?', [runId]);
+    if (run) {
+      await inventoryIn(run.game_id, rawMaterial, quantityRaw, runId, null, `Mined: ${rawMaterial}`);
+    }
+
     res.status(201).json({ id: result.lastInsertRowid });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
@@ -98,6 +112,21 @@ router.put('/refining/:id', async (req, res) => {
         status = COALESCE(?, status)
       WHERE id = ?
     `, [refineryName ?? null, refineryMethod ?? null, outputQuantity ?? null, efficiency ?? null, costToRefine ?? null, completedAt ?? null, status ?? null, req.params.id]);
+
+    // When refining completes, add refined material to inventory
+    if (status === 'done' && outputQuantity != null) {
+      const rj = await db.get(`
+        SELECT rj.output_material, me.run_id, r.game_id
+        FROM refining_jobs rj
+        JOIN mining_entries me ON rj.mining_entry_id = me.id
+        JOIN runs r ON me.run_id = r.id
+        WHERE rj.id = ?
+      `, [req.params.id]);
+      if (rj) {
+        await inventoryIn(rj.game_id, rj.output_material, outputQuantity, rj.run_id, null, `Refined: ${rj.output_material}`);
+      }
+    }
+
     res.json({ ok: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });

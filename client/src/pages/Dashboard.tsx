@@ -1,47 +1,83 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { accountingApi, runsApi } from '@/lib/api';
 import { StatCard } from '@/components/ui/StatCard';
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Table, Th, Td, Tr } from '@/components/ui/Table';
-import { fmtCurrency, fmtDuration, profitColor } from '@/lib/utils';
+import { fmtCurrency, fmtDuration, profitColor, RUN_TYPES } from '@/lib/utils';
 import { Link } from 'react-router-dom';
-import { TrendingUp, TrendingDown, Clock, Zap } from 'lucide-react';
 
 export function Dashboard() {
-  const { data: summary = [] } = useQuery({ queryKey: ['accounting-summary'], queryFn: () => accountingApi.summary() });
-  const { data: runs = [] } = useQuery({ queryKey: ['runs-recent'], queryFn: () => runsApi.list({ status: 'active' }) });
-  const { data: allRuns = [] } = useQuery({ queryKey: ['runs-report'], queryFn: () => accountingApi.runsReport() });
+  const [typeFilter, setTypeFilter] = useState('');
 
+  const { data: summary = [] } = useQuery({ queryKey: ['accounting-summary'], queryFn: () => accountingApi.summary() });
+  const { data: activeRuns = [] } = useQuery({
+    queryKey: ['runs-active', typeFilter],
+    queryFn: () => runsApi.list({ status: 'active', ...(typeFilter ? { type: typeFilter } : {}) }),
+  });
+  const { data: allRuns = [] } = useQuery({
+    queryKey: ['runs-report', typeFilter],
+    queryFn: () => accountingApi.runsReport(typeFilter ? { type: typeFilter } : undefined),
+  });
+
+  // Stats from the (filtered) runs report
+  const filteredRevenue = (allRuns as any[]).reduce((s: number, r: any) => s + (r.revenue ?? 0), 0);
+  const filteredExpenses = (allRuns as any[]).reduce((s: number, r: any) => s + (r.expenses ?? 0), 0);
+  const filteredProfit = (allRuns as any[]).reduce((s: number, r: any) => s + (r.profit ?? 0), 0);
+  const filteredCrewPayouts = (allRuns as any[]).reduce((s: number, r: any) => s + (r.crew_payouts ?? 0), 0);
+
+  // Unfiltered totals for the per-game summary (always shows full picture)
   const totalIncome = (summary as any[]).reduce((s: number, g: any) => s + g.total_income, 0);
   const totalExpenses = (summary as any[]).reduce((s: number, g: any) => s + g.total_expenses + g.total_investment, 0);
   const totalNet = (summary as any[]).reduce((s: number, g: any) => s + g.net, 0);
   const totalCrewPayouts = (summary as any[]).reduce((s: number, g: any) => s + g.total_crew_payouts, 0);
 
-  const recentRuns = (allRuns as any[]).slice(0, 8);
-  const activeRuns = (runs as any[]);
-  const bestRun = (allRuns as any[]).reduce((best: any, r: any) => (!best || r.profit > best.profit ? r : best), null);
+  const showingFiltered = !!typeFilter;
+  const recentRuns = (allRuns as any[]).slice(0, 10);
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-100">Dashboard</h1>
-        <p className="text-sm text-slate-500 mt-0.5">Your game economy at a glance</p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-100">Dashboard</h1>
+          <p className="text-sm text-slate-500 mt-0.5">Your game economy at a glance</p>
+        </div>
+        {/* Activity filter */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-500">Filter activity:</span>
+          <select className="w-36" value={typeFilter} onChange={e => setTypeFilter(e.target.value)}>
+            <option value="">All types</option>
+            {RUN_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
       </div>
 
-      {/* Summary stats */}
+      {/* Summary stats — filtered when a type is selected */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="Total Revenue" value={fmtCurrency(totalIncome)} trend="up" />
-        <StatCard label="Total Expenses" value={fmtCurrency(totalExpenses)} trend="down" />
-        <StatCard label="Net Profit" value={fmtCurrency(totalNet)} trend={totalNet >= 0 ? 'up' : 'down'} />
-        <StatCard label="Crew Payouts" value={fmtCurrency(totalCrewPayouts)} />
+        {showingFiltered ? (
+          <>
+            <StatCard label={`Revenue (${typeFilter})`} value={fmtCurrency(filteredRevenue)} trend="up" />
+            <StatCard label={`Expenses (${typeFilter})`} value={fmtCurrency(filteredExpenses)} trend="down" />
+            <StatCard label={`Net Profit (${typeFilter})`} value={fmtCurrency(filteredProfit)} trend={filteredProfit >= 0 ? 'up' : 'down'} />
+            <StatCard label={`Crew Payouts (${typeFilter})`} value={fmtCurrency(filteredCrewPayouts)} />
+          </>
+        ) : (
+          <>
+            <StatCard label="Total Revenue" value={fmtCurrency(totalIncome)} trend="up" />
+            <StatCard label="Total Expenses" value={fmtCurrency(totalExpenses)} trend="down" />
+            <StatCard label="Net Profit" value={fmtCurrency(totalNet)} trend={totalNet >= 0 ? 'up' : 'down'} />
+            <StatCard label="Crew Payouts" value={fmtCurrency(totalCrewPayouts)} />
+          </>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        {/* Per-game breakdown */}
+        {/* Per-game breakdown — always unfiltered total */}
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>Per-Game Summary</CardTitle>
+            {showingFiltered && <span className="text-xs text-slate-500">Totals across all activity types</span>}
           </CardHeader>
           {(summary as any[]).length === 0 ? (
             <p className="text-sm text-slate-500">No data yet. Start a run to see stats here.</p>
@@ -72,13 +108,13 @@ export function Dashboard() {
         {/* Active runs */}
         <Card>
           <CardHeader>
-            <CardTitle>Active Runs</CardTitle>
+            <CardTitle>Active Runs{showingFiltered ? ` (${typeFilter})` : ''}</CardTitle>
           </CardHeader>
-          {activeRuns.length === 0 ? (
-            <p className="text-sm text-slate-500">No active runs.</p>
+          {(activeRuns as any[]).length === 0 ? (
+            <p className="text-sm text-slate-500">No active runs{showingFiltered ? ` of type "${typeFilter}"` : ''}.</p>
           ) : (
             <div className="space-y-2">
-              {activeRuns.map((r: any) => (
+              {(activeRuns as any[]).map((r: any) => (
                 <Link
                   key={r.id}
                   to={`/runs/${r.id}`}
@@ -99,7 +135,7 @@ export function Dashboard() {
       {/* Recent runs table */}
       <Card>
         <CardHeader>
-          <CardTitle>Recent Runs</CardTitle>
+          <CardTitle>Recent Runs{showingFiltered ? ` — ${typeFilter} only` : ''}</CardTitle>
           <Link to="/runs" className="text-xs text-blue-400 hover:text-blue-300">View all →</Link>
         </CardHeader>
         <Table>
@@ -118,7 +154,9 @@ export function Dashboard() {
           <tbody>
             {recentRuns.length === 0 ? (
               <Tr>
-                <Td className="text-slate-500 col-span-8" colSpan={8}>No runs yet. Create your first run!</Td>
+                <Td className="text-slate-500" colSpan={8}>
+                  {showingFiltered ? `No ${typeFilter} runs yet.` : 'No runs yet. Create your first run!'}
+                </Td>
               </Tr>
             ) : (
               recentRuns.map((r: any) => (

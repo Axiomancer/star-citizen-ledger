@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   runsApi, miningApi, tradingApi, salesApi, craftingApi,
-  contractsApi, expensesApi, accountingApi, crewApi,
+  contractsApi, expensesApi, crewApi,
 } from '@/lib/api';
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -12,7 +12,7 @@ import { Modal } from '@/components/ui/Modal';
 import { StatCard } from '@/components/ui/StatCard';
 import { Table, Th, Td, Tr } from '@/components/ui/Table';
 import { fmtCurrency, fmtDuration, fmtDatetime, profitColor, EXPENSE_CATEGORIES, CONTRACT_TYPES } from '@/lib/utils';
-import { Plus, CheckCircle, Trash2, ChevronLeft, DollarSign, Clock } from 'lucide-react';
+import { Plus, CheckCircle, Trash2, ChevronLeft, DollarSign, Clock, AlertTriangle } from 'lucide-react';
 
 // ─── Sub-panel: Mining Pipeline ───────────────────────────────────────────────
 function MiningPanel({ runId, currency }: { runId: number; currency: string }) {
@@ -30,16 +30,35 @@ function MiningPanel({ runId, currency }: { runId: number; currency: string }) {
   });
   const addSale = useMutation({
     mutationFn: (d: unknown) => salesApi.create(d),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['mining', runId] }); qc.invalidateQueries({ queryKey: ['run', runId] }); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mining', runId] });
+      qc.invalidateQueries({ queryKey: ['run', runId] });
+      qc.invalidateQueries({ queryKey: ['inventory'] });
+    },
   });
   const removeEntry = useMutation({
     mutationFn: (id: number) => miningApi.removeEntry(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['mining', runId] }),
   });
+  const removeRefining = useMutation({
+    mutationFn: (id: number) => miningApi.removeRefining(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['mining', runId] }),
+  });
+  const removeSale = useMutation({
+    mutationFn: (id: number) => salesApi.remove(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mining', runId] });
+      qc.invalidateQueries({ queryKey: ['run', runId] });
+      qc.invalidateQueries({ queryKey: ['inventory'] });
+    },
+  });
   const finishRefining = useMutation({
     mutationFn: ({ id, qty, eff }: { id: number; qty: number; eff: number }) =>
       miningApi.updateRefining(id, { outputQuantity: qty, efficiency: eff, status: 'done', completedAt: new Date().toISOString() }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['mining', runId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mining', runId] });
+      qc.invalidateQueries({ queryKey: ['inventory'] });
+    },
   });
 
   const [entryForm, setEntryForm] = useState({ rawMaterial: '', quantityRaw: '', location: '' });
@@ -64,7 +83,6 @@ function MiningPanel({ runId, currency }: { runId: number; currency: string }) {
         }}><Plus size={13} /> Add</Button>
       </Card>
 
-      {/* Raw ore list */}
       {(entries as any[]).length > 0 && (
         <Card>
           <CardHeader><CardTitle>Mined Ore</CardTitle></CardHeader>
@@ -113,16 +131,15 @@ function MiningPanel({ runId, currency }: { runId: number; currency: string }) {
         }}><Plus size={13} /> Queue Refining</Button>
       </Card>
 
-      {/* Refining jobs */}
       {(refiningJobs as any[]).length > 0 && (
         <Card>
           <CardHeader><CardTitle>Refining Jobs</CardTitle></CardHeader>
           <Table>
-            <thead><tr><Th>Material</Th><Th>Input</Th><Th>Output</Th><Th>Yield</Th><Th>Cost</Th><Th>Status</Th><Th>Complete</Th></tr></thead>
+            <thead><tr><Th>Material</Th><Th>Input</Th><Th>Output</Th><Th>Yield</Th><Th>Cost</Th><Th>Status</Th><Th>Complete</Th><Th /></tr></thead>
             <tbody>
               {(refiningJobs as any[]).map((rj: any) => (
                 <Tr key={rj.id}>
-                  <Td>{rj.output_material}<br/><span className="text-xs text-slate-500">{rj.refinery_name} · {rj.refinery_method}</span></Td>
+                  <Td>{rj.output_material}<br /><span className="text-xs text-slate-500">{rj.refinery_name} · {rj.refinery_method}</span></Td>
                   <Td>{rj.input_quantity} SCU</Td>
                   <Td>{rj.output_quantity != null ? `${rj.output_quantity} SCU` : '—'}</Td>
                   <Td>{rj.efficiency != null ? `${rj.efficiency}%` : '—'}</Td>
@@ -141,6 +158,7 @@ function MiningPanel({ runId, currency }: { runId: number; currency: string }) {
                       </div>
                     )}
                   </Td>
+                  <Td><Button variant="danger" size="sm" onClick={() => removeRefining.mutate(rj.id)}><Trash2 size={12} /></Button></Td>
                 </Tr>
               ))}
             </tbody>
@@ -182,12 +200,11 @@ function MiningPanel({ runId, currency }: { runId: number; currency: string }) {
         }}><DollarSign size={13} /> Record Sale</Button>
       </Card>
 
-      {/* Sales */}
       {(sales as any[]).length > 0 && (
         <Card>
           <CardHeader><CardTitle>Sales</CardTitle></CardHeader>
           <Table>
-            <thead><tr><Th>Commodity</Th><Th>Qty</Th><Th>Price/unit</Th><Th>Revenue</Th><Th>Location</Th></tr></thead>
+            <thead><tr><Th>Commodity</Th><Th>Qty</Th><Th>Price/unit</Th><Th>Revenue</Th><Th>Location</Th><Th /></tr></thead>
             <tbody>
               {(sales as any[]).map((s: any) => (
                 <Tr key={s.id}>
@@ -196,6 +213,7 @@ function MiningPanel({ runId, currency }: { runId: number; currency: string }) {
                   <Td>{fmtCurrency(s.price_per_unit, currency)}</Td>
                   <Td className="text-emerald-400 font-semibold">{fmtCurrency(s.total_revenue, currency)}</Td>
                   <Td className="text-slate-500">{s.location || '—'}</Td>
+                  <Td><Button variant="danger" size="sm" onClick={() => removeSale.mutate(s.id)}><Trash2 size={12} /></Button></Td>
                 </Tr>
               ))}
             </tbody>
@@ -206,13 +224,221 @@ function MiningPanel({ runId, currency }: { runId: number; currency: string }) {
   );
 }
 
+// ─── Sub-panel: Trading ───────────────────────────────────────────────────────
+function TradingPanel({ runId, currency }: { runId: number; currency: string }) {
+  const qc = useQueryClient();
+  const { data: entries = [] } = useQuery({ queryKey: ['trading', runId], queryFn: () => tradingApi.getForRun(runId) });
+
+  const [buyForm, setBuyForm] = useState({ commodity: '', quantityBought: '', buyPricePerUnit: '', buyLocation: '', sellLocation: '' });
+  const [sellForm, setSellForm] = useState<{ [entryId: number]: { qty: string; price: string; location: string } }>({});
+
+  const addEntry = useMutation({
+    mutationFn: (d: unknown) => tradingApi.create(d),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['trading', runId] });
+      qc.invalidateQueries({ queryKey: ['inventory'] });
+    },
+  });
+  const removeEntry = useMutation({
+    mutationFn: (id: number) => tradingApi.remove(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['trading', runId] });
+      qc.invalidateQueries({ queryKey: ['run', runId] });
+      qc.invalidateQueries({ queryKey: ['inventory'] });
+    },
+  });
+  const recordSale = useMutation({
+    mutationFn: (d: unknown) => salesApi.create(d),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['trading', runId] });
+      qc.invalidateQueries({ queryKey: ['run', runId] });
+      qc.invalidateQueries({ queryKey: ['inventory'] });
+    },
+  });
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader><CardTitle>Buy Commodity</CardTitle></CardHeader>
+        <div className="grid grid-cols-3 gap-2">
+          <input placeholder="Commodity" value={buyForm.commodity} onChange={e => setBuyForm(f => ({ ...f, commodity: e.target.value }))} />
+          <input type="number" placeholder="Qty bought" value={buyForm.quantityBought} onChange={e => setBuyForm(f => ({ ...f, quantityBought: e.target.value }))} />
+          <input type="number" placeholder="Buy price/unit" value={buyForm.buyPricePerUnit} onChange={e => setBuyForm(f => ({ ...f, buyPricePerUnit: e.target.value }))} />
+          <input placeholder="Buy location" value={buyForm.buyLocation} onChange={e => setBuyForm(f => ({ ...f, buyLocation: e.target.value }))} />
+          <input placeholder="Planned sell location" value={buyForm.sellLocation} onChange={e => setBuyForm(f => ({ ...f, sellLocation: e.target.value }))} />
+          {buyForm.quantityBought && buyForm.buyPricePerUnit && (
+            <div className="flex items-center text-red-400 text-sm font-semibold">
+              Cost: {fmtCurrency(Number(buyForm.quantityBought) * Number(buyForm.buyPricePerUnit), currency)}
+            </div>
+          )}
+        </div>
+        <Button className="mt-2" size="sm" onClick={() => {
+          if (!buyForm.commodity || !buyForm.quantityBought || !buyForm.buyPricePerUnit) return;
+          addEntry.mutate({ runId, commodity: buyForm.commodity, quantityBought: Number(buyForm.quantityBought), buyPricePerUnit: Number(buyForm.buyPricePerUnit), buyLocation: buyForm.buyLocation || undefined, sellLocation: buyForm.sellLocation || undefined });
+          setBuyForm({ commodity: '', quantityBought: '', buyPricePerUnit: '', buyLocation: '', sellLocation: '' });
+        }}><Plus size={13} /> Record Purchase</Button>
+      </Card>
+
+      {(entries as any[]).length > 0 && (
+        <div className="space-y-3">
+          {(entries as any[]).map((e: any) => {
+            const remaining = e.quantity_bought - (e.sold_quantity ?? 0);
+            const margin = e.revenue > 0 ? e.revenue - e.total_cost : null;
+            const sf = sellForm[e.id] || { qty: '', price: '', location: '' };
+            return (
+              <Card key={e.id}>
+                <div className="flex items-start justify-between mb-2">
+                  <div>
+                    <span className="font-semibold text-slate-200">{e.commodity}</span>
+                    <span className="ml-2 text-xs text-slate-500">{e.buy_location || '?'} → {e.sell_location || '?'}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge label={e.status} />
+                    <Button variant="danger" size="sm" onClick={() => removeEntry.mutate(e.id)}><Trash2 size={12} /></Button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-4 gap-3 text-sm mb-3">
+                  <div><p className="text-xs text-slate-500">Bought</p><p className="text-slate-200">{e.quantity_bought} @ {fmtCurrency(e.buy_price_per_unit, currency)}</p></div>
+                  <div><p className="text-xs text-slate-500">Cost</p><p className="text-red-400">{fmtCurrency(e.total_cost, currency)}</p></div>
+                  <div><p className="text-xs text-slate-500">Revenue</p><p className="text-emerald-400">{fmtCurrency(e.revenue, currency)}</p></div>
+                  <div><p className="text-xs text-slate-500">Margin</p><p className={margin != null ? profitColor(margin) : 'text-slate-500'}>{margin != null ? fmtCurrency(margin, currency) : '—'}</p></div>
+                </div>
+                {remaining > 0 && (
+                  <div className="border-t border-[#1e2d4f] pt-2">
+                    <p className="text-xs text-slate-500 mb-1.5">Record sale ({remaining} remaining)</p>
+                    <div className="flex gap-2">
+                      <input type="number" placeholder={`Qty (max ${remaining})`} className="w-28" value={sf.qty} onChange={ev => setSellForm(f => ({ ...f, [e.id]: { ...f[e.id], qty: ev.target.value } }))} />
+                      <input type="number" placeholder="Price/unit" className="w-28" value={sf.price} onChange={ev => setSellForm(f => ({ ...f, [e.id]: { ...f[e.id], price: ev.target.value } }))} />
+                      <input placeholder="Location" className="w-32" value={sf.location} onChange={ev => setSellForm(f => ({ ...f, [e.id]: { ...f[e.id], location: ev.target.value } }))} />
+                      <Button size="sm" onClick={() => {
+                        if (!sf.qty || !sf.price) return;
+                        recordSale.mutate({ runId, tradingEntryId: e.id, commodity: e.commodity, quantitySold: Number(sf.qty), pricePerUnit: Number(sf.price), location: sf.location || undefined });
+                        setSellForm(f => ({ ...f, [e.id]: { qty: '', price: '', location: '' } }));
+                      }}><DollarSign size={12} /> Sell</Button>
+                    </div>
+                  </div>
+                )}
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Sub-panel: Crafting ──────────────────────────────────────────────────────
+function CraftingPanel({ runId, currency }: { runId: number; currency: string }) {
+  const qc = useQueryClient();
+  const { data: jobs = [] } = useQuery({ queryKey: ['crafting', runId], queryFn: () => craftingApi.getForRun(runId) });
+
+  const [jobForm, setJobForm] = useState({ outputItem: '', outputQuantity: '', estimatedValue: '' });
+  const [inputForms, setInputForms] = useState<{ [jobId: number]: { material: string; quantityRequired: string; costPerUnit: string } }>({});
+
+  const addJob = useMutation({
+    mutationFn: (d: unknown) => craftingApi.createJob(d),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['crafting', runId] }),
+  });
+  const removeJob = useMutation({
+    mutationFn: (id: number) => craftingApi.removeJob(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['crafting', runId] }); qc.invalidateQueries({ queryKey: ['run', runId] }); },
+  });
+  const completeJob = useMutation({
+    mutationFn: (id: number) => craftingApi.updateJob(id, { status: 'complete', completedAt: new Date().toISOString() }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['crafting', runId] }),
+  });
+  const addInput = useMutation({
+    mutationFn: ({ jobId, d }: { jobId: number; d: unknown }) => craftingApi.addInput(jobId, d),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['crafting', runId] }),
+  });
+  const removeInput = useMutation({
+    mutationFn: (id: number) => craftingApi.removeInput(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['crafting', runId] }),
+  });
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader><CardTitle>New Crafting Job</CardTitle></CardHeader>
+        <div className="grid grid-cols-3 gap-2">
+          <input placeholder="Output item" value={jobForm.outputItem} onChange={e => setJobForm(f => ({ ...f, outputItem: e.target.value }))} />
+          <input type="number" placeholder="Output quantity" value={jobForm.outputQuantity} onChange={e => setJobForm(f => ({ ...f, outputQuantity: e.target.value }))} />
+          <input type="number" placeholder="Est. sell value" value={jobForm.estimatedValue} onChange={e => setJobForm(f => ({ ...f, estimatedValue: e.target.value }))} />
+        </div>
+        <Button className="mt-2" size="sm" onClick={() => {
+          if (!jobForm.outputItem || !jobForm.outputQuantity) return;
+          addJob.mutate({ runId, outputItem: jobForm.outputItem, outputQuantity: Number(jobForm.outputQuantity), estimatedValue: jobForm.estimatedValue ? Number(jobForm.estimatedValue) : undefined });
+          setJobForm({ outputItem: '', outputQuantity: '', estimatedValue: '' });
+        }}><Plus size={13} /> Create Job</Button>
+      </Card>
+
+      {(jobs as any[]).map((job: any) => {
+        const inf = inputForms[job.id] || { material: '', quantityRequired: '', costPerUnit: '' };
+        const totalInputCost = (job.inputs || []).reduce((s: number, i: any) => s + (i.total_cost ?? 0), 0);
+        const margin = job.estimated_value != null ? job.estimated_value - totalInputCost : null;
+        return (
+          <Card key={job.id}>
+            <div className="flex items-start justify-between mb-2">
+              <div>
+                <span className="font-semibold text-slate-200">{job.output_item}</span>
+                <span className="ml-2 text-sm text-slate-400">× {job.output_quantity}</span>
+              </div>
+              <div className="flex gap-2 items-center">
+                <Badge label={job.status} />
+                {job.status !== 'complete' && (
+                  <Button size="sm" variant="secondary" onClick={() => completeJob.mutate(job.id)}>
+                    <CheckCircle size={12} /> Complete
+                  </Button>
+                )}
+                <Button variant="danger" size="sm" onClick={() => removeJob.mutate(job.id)}><Trash2 size={12} /></Button>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3 text-sm mb-3">
+              <div><p className="text-xs text-slate-500">Input cost</p><p className="text-red-400">{fmtCurrency(totalInputCost, currency)}</p></div>
+              <div><p className="text-xs text-slate-500">Est. value</p><p className="text-slate-200">{job.estimated_value != null ? fmtCurrency(job.estimated_value, currency) : '—'}</p></div>
+              <div><p className="text-xs text-slate-500">Est. margin</p><p className={margin != null ? profitColor(margin) : 'text-slate-500'}>{margin != null ? fmtCurrency(margin, currency) : '—'}</p></div>
+            </div>
+
+            {/* Inputs table */}
+            {(job.inputs || []).length > 0 && (
+              <Table>
+                <thead><tr><Th>Material</Th><Th>Qty Req.</Th><Th>Cost/unit</Th><Th>Total</Th><Th /></tr></thead>
+                <tbody>
+                  {(job.inputs as any[]).map((inp: any) => (
+                    <Tr key={inp.id}>
+                      <Td>{inp.material}</Td>
+                      <Td>{inp.quantity_required}</Td>
+                      <Td className="text-slate-400">{inp.cost_per_unit != null ? fmtCurrency(inp.cost_per_unit, currency) : '—'}</Td>
+                      <Td className="text-red-400">{inp.total_cost != null ? fmtCurrency(inp.total_cost, currency) : '—'}</Td>
+                      <Td><Button variant="danger" size="sm" onClick={() => removeInput.mutate(inp.id)}><Trash2 size={12} /></Button></Td>
+                    </Tr>
+                  ))}
+                </tbody>
+              </Table>
+            )}
+
+            {/* Add input */}
+            <div className="flex gap-2 mt-2">
+              <input placeholder="Material" value={inf.material} onChange={ev => setInputForms(f => ({ ...f, [job.id]: { ...f[job.id], material: ev.target.value } }))} />
+              <input type="number" placeholder="Qty" className="w-20" value={inf.quantityRequired} onChange={ev => setInputForms(f => ({ ...f, [job.id]: { ...f[job.id], quantityRequired: ev.target.value } }))} />
+              <input type="number" placeholder="Cost/unit" className="w-24" value={inf.costPerUnit} onChange={ev => setInputForms(f => ({ ...f, [job.id]: { ...f[job.id], costPerUnit: ev.target.value } }))} />
+              <Button size="sm" variant="secondary" onClick={() => {
+                if (!inf.material || !inf.quantityRequired) return;
+                addInput.mutate({ jobId: job.id, d: { material: inf.material, quantityRequired: Number(inf.quantityRequired), costPerUnit: inf.costPerUnit ? Number(inf.costPerUnit) : undefined } });
+                setInputForms(f => ({ ...f, [job.id]: { material: '', quantityRequired: '', costPerUnit: '' } }));
+              }}><Plus size={12} /> Input</Button>
+            </div>
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Sub-panel: Expenses ──────────────────────────────────────────────────────
 function ExpensesPanel({ runId, currency }: { runId: number; currency: string }) {
   const qc = useQueryClient();
-  const { data: expenses = [] } = useQuery({
-    queryKey: ['expenses', runId],
-    queryFn: () => expensesApi.list({ runId }),
-  });
+  const { data: expenses = [] } = useQuery({ queryKey: ['expenses', runId], queryFn: () => expensesApi.list({ runId }) });
   const [form, setForm] = useState({ category: 'fuel', itemName: '', amount: '', notes: '' });
 
   const add = useMutation({
@@ -221,7 +447,7 @@ function ExpensesPanel({ runId, currency }: { runId: number; currency: string })
   });
   const remove = useMutation({
     mutationFn: (id: number) => expensesApi.remove(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['expenses', runId] }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['expenses', runId] }); qc.invalidateQueries({ queryKey: ['run', runId] }); },
   });
 
   const total = (expenses as any[]).reduce((s: number, e: any) => s + e.amount, 0);
@@ -363,7 +589,11 @@ function ContractsPanel({ runId, currency }: { runId: number; currency: string }
   });
   const complete = useMutation({
     mutationFn: (id: number) => contractsApi.complete(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['contracts', runId] }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['contracts', runId] }); qc.invalidateQueries({ queryKey: ['run', runId] }); },
+  });
+  const remove = useMutation({
+    mutationFn: (id: number) => contractsApi.remove(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['contracts', runId] }); qc.invalidateQueries({ queryKey: ['run', runId] }); },
   });
 
   return (
@@ -398,11 +628,14 @@ function ContractsPanel({ runId, currency }: { runId: number; currency: string }
                 <Td className="text-amber-400">{c.bonus_payout ? fmtCurrency(c.bonus_payout, currency) : '—'}</Td>
                 <Td><Badge label={c.status} /></Td>
                 <Td>
-                  {c.status === 'active' && (
-                    <Button size="sm" variant="secondary" onClick={() => complete.mutate(c.id)}>
-                      <CheckCircle size={12} /> Complete
-                    </Button>
-                  )}
+                  <div className="flex gap-1">
+                    {c.status === 'active' && (
+                      <Button size="sm" variant="secondary" onClick={() => complete.mutate(c.id)}>
+                        <CheckCircle size={12} /> Complete
+                      </Button>
+                    )}
+                    <Button variant="danger" size="sm" onClick={() => remove.mutate(c.id)}><Trash2 size={12} /></Button>
+                  </div>
                 </Td>
               </Tr>
             ))}
@@ -410,6 +643,39 @@ function ContractsPanel({ runId, currency }: { runId: number; currency: string }
         </Table>
       )}
     </div>
+  );
+}
+
+// ─── Delete Run confirmation modal ────────────────────────────────────────────
+function DeleteRunModal({ runId, runTitle, open, onClose }: { runId: number; runTitle: string; open: boolean; onClose: () => void }) {
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const del = useMutation({
+    mutationFn: () => runsApi.remove(runId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['runs'] });
+      navigate('/runs');
+    },
+  });
+  return (
+    <Modal open={open} onClose={onClose} title="Delete Run">
+      <div className="space-y-4">
+        <div className="flex gap-3 items-start">
+          <AlertTriangle size={20} className="text-red-400 mt-0.5 shrink-0" />
+          <p className="text-sm text-slate-300">
+            Permanently delete <strong className="text-slate-100">"{runTitle}"</strong>?
+            All mining entries, refining jobs, trading entries, crafting jobs, contracts, expenses, and crew assignments will be removed.
+            This cannot be undone.
+          </p>
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button variant="danger" onClick={() => del.mutate()} disabled={del.isPending}>
+            <Trash2 size={13} /> {del.isPending ? 'Deleting…' : 'Delete Run'}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -422,6 +688,7 @@ export function RunDetail() {
   const runId = Number(id);
   const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>('overview');
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const { data: run, isLoading } = useQuery({ queryKey: ['run', runId], queryFn: () => runsApi.get(runId) });
 
@@ -453,11 +720,16 @@ export function RunDetail() {
             {r.location && <span className="text-sm text-slate-500">· {r.location}</span>}
           </div>
         </div>
-        {r.status === 'active' && (
-          <Button onClick={() => completeMut.mutate()} disabled={completeMut.isPending}>
-            <CheckCircle size={14} /> End Run
+        <div className="flex gap-2">
+          {r.status === 'active' && (
+            <Button onClick={() => completeMut.mutate()} disabled={completeMut.isPending}>
+              <CheckCircle size={14} /> End Run
+            </Button>
+          )}
+          <Button variant="danger" onClick={() => setDeleteOpen(true)}>
+            <Trash2 size={14} /> Delete
           </Button>
-        )}
+        </div>
       </div>
 
       {/* Timing */}
@@ -482,12 +754,12 @@ export function RunDetail() {
       </div>
 
       {/* Tab nav */}
-      <div className="flex gap-1 border-b border-[#1e2d4f]">
+      <div className="flex gap-1 border-b border-[#1e2d4f] overflow-x-auto">
         {TABS.map(t => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`px-3 py-2 text-sm font-medium capitalize transition-colors border-b-2 -mb-px ${
+            className={`px-3 py-2 text-sm font-medium capitalize transition-colors border-b-2 -mb-px whitespace-nowrap ${
               tab === t
                 ? 'border-blue-500 text-blue-300'
                 : 'border-transparent text-slate-500 hover:text-slate-300'
@@ -541,15 +813,14 @@ export function RunDetail() {
           </div>
         )}
         {tab === 'mining' && <MiningPanel runId={runId} currency={currency} />}
+        {tab === 'trading' && <TradingPanel runId={runId} currency={currency} />}
+        {tab === 'crafting' && <CraftingPanel runId={runId} currency={currency} />}
+        {tab === 'contracts' && <ContractsPanel runId={runId} currency={currency} />}
         {tab === 'expenses' && <ExpensesPanel runId={runId} currency={currency} />}
         {tab === 'crew' && <CrewPanel runId={runId} currency={currency} profit={r.profit} />}
-        {tab === 'contracts' && <ContractsPanel runId={runId} currency={currency} />}
-        {(tab === 'trading' || tab === 'crafting') && (
-          <Card className="text-slate-400 text-sm">
-            {tab === 'trading' ? 'Trading panel' : 'Crafting panel'} — coming in next build. Use Expenses + Sales tabs for now.
-          </Card>
-        )}
       </div>
+
+      <DeleteRunModal runId={runId} runTitle={r.title || `Run #${r.id}`} open={deleteOpen} onClose={() => setDeleteOpen(false)} />
     </div>
   );
 }

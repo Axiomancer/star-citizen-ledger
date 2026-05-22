@@ -67,7 +67,7 @@ router.get('/breakdown', async (req, res) => {
 
 router.get('/runs', async (req, res) => {
   try {
-    const { gameId } = req.query;
+    const { gameId, type } = req.query;
     let q = `
       SELECT
         r.id, r.title, r.type, r.status, r.started_at, r.ended_at,
@@ -87,6 +87,7 @@ router.get('/runs', async (req, res) => {
     `;
     const args: unknown[] = [];
     if (gameId) { q += ' AND r.game_id = ?'; args.push(gameId); }
+    if (type) { q += ' AND r.type = ?'; args.push(type); }
     q += ' ORDER BY r.created_at DESC';
 
     const rows = await db.all(q, args);

@@ -53,6 +53,53 @@ router.post('/:id/adjust', async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+/** Player-to-player sale: reduces inventory and records income in the ledger */
+router.post('/:id/sell', async (req, res) => {
+  const { quantity, pricePerUnit, buyerName, notes, date } = req.body;
+  if (quantity == null || pricePerUnit == null) {
+    return res.status(400).json({ error: 'quantity and pricePerUnit required' });
+  }
+  try {
+    const inv = await db.get('SELECT * FROM inventory WHERE id = ?', [req.params.id]);
+    if (!inv) return res.status(404).json({ error: 'not found' });
+    if (inv.quantity < quantity) return res.status(400).json({ error: 'insufficient stock' });
+
+    const totalRevenue = quantity * pricePerUnit;
+    const soldAt = date ?? new Date().toISOString();
+
+    // Reduce inventory
+    await db.run(
+      "UPDATE inventory SET quantity = quantity - ?, updated_at = datetime('now') WHERE id = ?",
+      [quantity, req.params.id]
+    );
+
+    // Record inventory transaction
+    await db.run(
+      'INSERT INTO inventory_transactions (inventory_id, run_id, type, quantity, unit_cost, reason) VALUES (?, ?, ?, ?, ?, ?)',
+      [req.params.id, null, 'out', quantity, pricePerUnit, `Sold to player${buyerName ? ': ' + buyerName : ''}`]
+    );
+
+    // Record sale (no run_id)
+    const saleResult = await db.run(
+      'INSERT INTO sales (run_id, commodity, quantity_sold, price_per_unit, total_revenue, location, sold_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [null, inv.item, quantity, pricePerUnit, totalRevenue, buyerName ?? null, soldAt]
+    );
+
+    // Record ledger income entry
+    await db.run(
+      'INSERT INTO ledger_entries (game_id, run_id, type, category, amount, description, date) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [
+        inv.game_id, null, 'income', 'player_trade',
+        totalRevenue,
+        `Sold ${quantity}× ${inv.item}${buyerName ? ' to ' + buyerName : ''}${notes ? ' — ' + notes : ''}`,
+        soldAt.split('T')[0],
+      ]
+    );
+
+    res.status(201).json({ id: saleResult.lastInsertRowid, totalRevenue });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/:id/transactions', async (req, res) => {
   try {
     const rows = await db.all(
