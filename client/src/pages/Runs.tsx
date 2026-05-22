@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { Table, Th, Td, Tr } from '@/components/ui/Table';
 import { fmtCurrency, fmtDuration, fmtDatetime, profitColor, RUN_TYPES } from '@/lib/utils';
-import { Plus, Play, CheckCircle } from 'lucide-react';
+import { Plus, Play, CheckCircle, Trash2 } from 'lucide-react';
 
 function NewRunModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
@@ -155,6 +155,10 @@ export function Runs() {
     mutationFn: (id: number) => runsApi.complete(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['runs'] }),
   });
+  const deleteMut = useMutation({
+    mutationFn: (id: number) => runsApi.remove(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['runs'] }),
+  });
 
   return (
     <div className="space-y-4">
@@ -221,16 +225,26 @@ export function Runs() {
                   <Td className="text-slate-400">{fmtDuration(r.duration_hours)}</Td>
                   <Td className="text-slate-500 text-xs">{fmtDatetime(r.started_at)}</Td>
                   <Td>
-                    {r.status === 'active' && (
+                    <div className="flex gap-1">
+                      {r.status === 'active' && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => completeMut.mutate(r.id)}
+                          disabled={completeMut.isPending}
+                        >
+                          <CheckCircle size={12} /> End
+                        </Button>
+                      )}
                       <Button
-                        variant="secondary"
+                        variant="danger"
                         size="sm"
-                        onClick={() => completeMut.mutate(r.id)}
-                        disabled={completeMut.isPending}
+                        onClick={() => { if (window.confirm(`Delete "${r.title || `Run #${r.id}`}"? This cannot be undone.`)) deleteMut.mutate(r.id); }}
+                        disabled={deleteMut.isPending}
                       >
-                        <CheckCircle size={12} /> End
+                        <Trash2 size={12} />
                       </Button>
-                    )}
+                    </div>
                   </Td>
                 </Tr>
               ))

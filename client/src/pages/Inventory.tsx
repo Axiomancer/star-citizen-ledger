@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Table, Th, Td, Tr } from '@/components/ui/Table';
 import { fmtCurrency } from '@/lib/utils';
-import { Plus, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
+import { Plus, Trash2, ArrowUp, ArrowDown, DollarSign } from 'lucide-react';
 
 function AdjustModal({ item, open, onClose, currency }: { item: any; open: boolean; onClose: () => void; currency: string }) {
   const qc = useQueryClient();
@@ -52,10 +52,92 @@ function AdjustModal({ item, open, onClose, currency }: { item: any; open: boole
   );
 }
 
+function SellModal({ item, open, onClose, currency }: { item: any; open: boolean; onClose: () => void; currency: string }) {
+  const qc = useQueryClient();
+  const [form, setForm] = useState({ quantity: '', pricePerUnit: '', buyerName: '', notes: '' });
+
+  const sell = useMutation({
+    mutationFn: (d: unknown) => inventoryApi.sell(item.id, d),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['inventory'] });
+      qc.invalidateQueries({ queryKey: ['accounting-summary'] });
+      qc.invalidateQueries({ queryKey: ['runs-report'] });
+      onClose();
+    },
+  });
+
+  const total = form.quantity && form.pricePerUnit
+    ? Number(form.quantity) * Number(form.pricePerUnit)
+    : null;
+
+  return (
+    <Modal open={open} onClose={onClose} title={`Sell to Player: ${item?.item}`}>
+      <form
+        onSubmit={e => {
+          e.preventDefault();
+          sell.mutate({
+            quantity: Number(form.quantity),
+            pricePerUnit: Number(form.pricePerUnit),
+            buyerName: form.buyerName || undefined,
+            notes: form.notes || undefined,
+          });
+        }}
+        className="space-y-3"
+      >
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-slate-400 mb-1 block">Quantity * (available: {item?.quantity})</label>
+            <input
+              type="number"
+              min={1}
+              max={item?.quantity}
+              value={form.quantity}
+              onChange={e => setForm(f => ({ ...f, quantity: e.target.value }))}
+              required
+            />
+          </div>
+          <div>
+            <label className="text-xs text-slate-400 mb-1 block">Price per unit * ({currency})</label>
+            <input
+              type="number"
+              min={0}
+              step="any"
+              value={form.pricePerUnit}
+              onChange={e => setForm(f => ({ ...f, pricePerUnit: e.target.value }))}
+              required
+            />
+          </div>
+        </div>
+        {total != null && (
+          <div className="rounded-lg bg-[#0f1629] px-3 py-2 text-sm">
+            <span className="text-slate-500">Total: </span>
+            <span className="text-emerald-400 font-semibold">{fmtCurrency(total, currency)}</span>
+          </div>
+        )}
+        <div>
+          <label className="text-xs text-slate-400 mb-1 block">Buyer name / org (optional)</label>
+          <input value={form.buyerName} onChange={e => setForm(f => ({ ...f, buyerName: e.target.value }))} placeholder="e.g. NXRT_Alpha" />
+        </div>
+        <div>
+          <label className="text-xs text-slate-400 mb-1 block">Notes (optional)</label>
+          <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="e.g. Sold at Port Olisar" />
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button type="submit" disabled={sell.isPending}>
+            <DollarSign size={14} /> {sell.isPending ? 'Selling…' : 'Confirm Sale'}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 export function Inventory() {
   const qc = useQueryClient();
   const [gameFilter, setGameFilter] = useState('');
   const [adjustItem, setAdjustItem] = useState<any>(null);
+  const [sellItem, setSellItem] = useState<any>(null);
   const [newForm, setNewForm] = useState({ gameId: '', item: '', quantity: '', unitCost: '', location: '' });
 
   const { data: inventory = [] } = useQuery({ queryKey: ['inventory', gameFilter], queryFn: () => inventoryApi.list(gameFilter ? { gameId: gameFilter } : undefined) });
@@ -71,6 +153,9 @@ export function Inventory() {
   });
 
   const totalValue = (inventory as any[]).reduce((s: number, i: any) => s + (i.quantity * (i.unit_cost || 0)), 0);
+
+  const getCurrency = (item: any) =>
+    (games as any[]).find((g: any) => g.id === item?.game_id)?.currency || 'UEC';
 
   return (
     <div className="space-y-4">
@@ -125,6 +210,9 @@ export function Inventory() {
                   <Td>
                     <div className="flex gap-1">
                       <Button size="sm" variant="secondary" onClick={() => setAdjustItem(i)}>Adjust</Button>
+                      <Button size="sm" onClick={() => setSellItem(i)} disabled={i.quantity === 0}>
+                        <DollarSign size={12} /> Sell
+                      </Button>
                       <Button variant="danger" size="sm" onClick={() => remove.mutate(i.id)}><Trash2 size={12} /></Button>
                     </div>
                   </Td>
@@ -136,7 +224,10 @@ export function Inventory() {
       </Card>
 
       {adjustItem && (
-        <AdjustModal item={adjustItem} open={!!adjustItem} onClose={() => setAdjustItem(null)} currency={(games as any[]).find((g: any) => g.id === adjustItem?.game_id)?.currency || 'UEC'} />
+        <AdjustModal item={adjustItem} open={!!adjustItem} onClose={() => setAdjustItem(null)} currency={getCurrency(adjustItem)} />
+      )}
+      {sellItem && (
+        <SellModal item={sellItem} open={!!sellItem} onClose={() => setSellItem(null)} currency={getCurrency(sellItem)} />
       )}
     </div>
   );

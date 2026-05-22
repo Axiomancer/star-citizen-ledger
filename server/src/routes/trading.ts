@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db';
+import { inventoryIn, inventoryOut } from '../lib/inventory';
 
 const router = Router();
 
@@ -28,6 +29,13 @@ router.post('/', async (req, res) => {
       'INSERT INTO trading_entries (run_id, commodity, quantity_bought, buy_price_per_unit, total_cost, buy_location, sell_location) VALUES (?, ?, ?, ?, ?, ?, ?)',
       [runId, commodity, quantityBought, buyPricePerUnit, totalCost, buyLocation ?? null, sellLocation ?? null]
     );
+
+    // Auto-track purchase in inventory
+    const run = await db.get('SELECT game_id FROM runs WHERE id = ?', [runId]);
+    if (run) {
+      await inventoryIn(run.game_id, commodity, quantityBought, runId, buyPricePerUnit, `Bought for trading: ${commodity}`);
+    }
+
     res.status(201).json({ id: result.lastInsertRowid });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
@@ -53,6 +61,16 @@ router.put('/:id', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
+    // Best-effort: reverse the inventory stock-in when a trading entry is removed
+    const te = await db.get(`
+      SELECT te.commodity, te.quantity_bought, r.game_id
+      FROM trading_entries te
+      JOIN runs r ON te.run_id = r.id
+      WHERE te.id = ?
+    `, [req.params.id]);
+    if (te) {
+      await inventoryOut(te.game_id, te.commodity, te.quantity_bought, null, `Deleted trading entry: ${te.commodity}`);
+    }
     await db.run('DELETE FROM trading_entries WHERE id = ?', [req.params.id]);
     res.json({ ok: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
