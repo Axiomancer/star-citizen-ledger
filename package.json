@@ -1,13 +1,14 @@
 {
-  "name": "game-ledger",
+  "name": "game-ledger-workspace",
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "dev": "pnpm --parallel -r dev",
-    "build": "pnpm -r build",
-    "start": "pnpm --parallel -r start"
-  },
-  "pnpm": {
-    "overrides": {}
+    "dev:server": "node server/node_modules/tsx/dist/cli.mjs server/src/index.ts",
+    "dev:client": "node client/node_modules/vite/bin/vite.js",
+    "build:server": "pnpm --filter game-ledger-server build",
+    "build:client": "pnpm --filter client build",
+    "build": "pnpm run build:server && pnpm run build:client",
+    "package": "pnpm run build && node scripts/prepare-electron.js && cd electron && npm install --omit=dev && npm run dist",
+    "package:dir": "pnpm run build && node scripts/prepare-electron.js && cd electron && npm install --omit=dev && npm run dist:dir"
   }
 }
