@@ -14,15 +14,15 @@ const client: Client = createClient({
 // Thin wrapper matching the better-sqlite3 API style but async
 export const db = {
   all: async (sql: string, args: unknown[] = []): Promise<any[]> => {
-    const r = await client.execute({ sql, args });
+    const r = await client.execute({ sql, args: args as any });
     return r.rows as any[];
   },
   get: async (sql: string, args: unknown[] = []): Promise<any | null> => {
-    const r = await client.execute({ sql, args });
+    const r = await client.execute({ sql, args: args as any });
     return (r.rows[0] as any) ?? null;
   },
   run: async (sql: string, args: unknown[] = []): Promise<{ lastInsertRowid: number }> => {
-    const r = await client.execute({ sql, args });
+    const r = await client.execute({ sql, args: args as any });
     return { lastInsertRowid: Number(r.lastInsertRowid ?? 0) };
   },
   exec: async (sql: string): Promise<void> => {
@@ -33,7 +33,7 @@ export const db = {
     }
   },
   batch: async (stmts: Array<{ sql: string; args?: unknown[] }>): Promise<void> => {
-    await client.batch(stmts.map(s => ({ sql: s.sql, args: s.args })));
+    await client.batch(stmts.map(s => ({ sql: s.sql, args: (s.args ?? []) as any })));
   },
 };
 

@@ -1,1 +1,39 @@
-node_modules
+# Dependencies
+node_modules/
+.pnpm-store/
+electron/node_modules/
+
+# Build outputs
+server/dist/
+client/dist/
+electron/server-dist/
+release/
+
+# Claude local settings
+.claude/settings.local.json
+
+# Database & user data (never commit)
+server/data/
+electron/data/
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env / secrets
+.env
+.env.local
+
+# Editor
+.idea/
+
+# Vite cache
+client/.vite/

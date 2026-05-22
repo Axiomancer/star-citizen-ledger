@@ -1,5 +1,7 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
+import fs from 'fs';
 import { initDb } from './db';
 
 import gamesRouter from './routes/games';
@@ -15,32 +17,50 @@ import expensesRouter from './routes/expenses';
 import inventoryRouter from './routes/inventory';
 import accountingRouter from './routes/accounting';
 
-const app = express();
-const PORT = process.env.PORT || 3001;
+export async function startServer(port?: number, clientDist?: string): Promise<void> {
+  const app = express();
+  const listenPort = port ?? Number(process.env.PORT ?? 3001);
 
-app.use(cors({ origin: 'http://localhost:5173' }));
-app.use(express.json());
+  app.use(cors({ origin: `http://localhost:${listenPort}` }));
+  app.use(express.json());
 
-app.use('/api/games', gamesRouter);
-app.use('/api/crew', crewRouter);
-app.use('/api/vehicles', vehiclesRouter);
-app.use('/api/runs', runsRouter);
-app.use('/api/mining', miningRouter);
-app.use('/api/trading', tradingRouter);
-app.use('/api/sales', salesRouter);
-app.use('/api/crafting', craftingRouter);
-app.use('/api/contracts', contractsRouter);
-app.use('/api/expenses', expensesRouter);
-app.use('/api/inventory', inventoryRouter);
-app.use('/api/accounting', accountingRouter);
+  app.use('/api/games', gamesRouter);
+  app.use('/api/crew', crewRouter);
+  app.use('/api/vehicles', vehiclesRouter);
+  app.use('/api/runs', runsRouter);
+  app.use('/api/mining', miningRouter);
+  app.use('/api/trading', tradingRouter);
+  app.use('/api/sales', salesRouter);
+  app.use('/api/crafting', craftingRouter);
+  app.use('/api/contracts', contractsRouter);
+  app.use('/api/expenses', expensesRouter);
+  app.use('/api/inventory', inventoryRouter);
+  app.use('/api/accounting', accountingRouter);
 
-app.get('/api/health', (_req, res) => res.json({ ok: true }));
+  app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
-async function main() {
+  // Serve the built React app in production (when clientDist is provided)
+  const staticDir = clientDist ?? process.env.CLIENT_DIST;
+  if (staticDir && fs.existsSync(staticDir)) {
+    app.use(express.static(staticDir));
+    // SPA fallback — all non-API routes return index.html
+    app.get('*', (_req, res) => {
+      res.sendFile(path.join(staticDir, 'index.html'));
+    });
+  }
+
   await initDb();
-  app.listen(PORT, () => {
-    console.log(`Game Ledger API running on http://localhost:${PORT}`);
+
+  return new Promise((resolve, reject) => {
+    const server = app.listen(listenPort, '127.0.0.1', () => {
+      console.log(`Game Ledger API running on http://127.0.0.1:${listenPort}`);
+      resolve();
+    });
+    server.on('error', reject);
   });
 }
 
-main().catch(err => { console.error('Failed to start:', err); process.exit(1); });
+// Auto-start when executed directly (dev mode)
+if (require.main === module) {
+  startServer().catch(err => { console.error(err); process.exit(1); });
+}

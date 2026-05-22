@@ -1,0 +1,63 @@
+{
+  "name": "game-ledger",
+  "productName": "Game Ledger",
+  "version": "0.1.0",
+  "description": "Local game economy tracker for Star Citizen, EVE Online, and more",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder",
+    "dist:dir": "electron-builder --dir"
+  },
+  "dependencies": {
+    "@libsql/client": "0.14.0",
+    "cors": "2.8.5",
+    "express": "4.19.2"
+  },
+  "devDependencies": {
+    "electron": "28.3.3",
+    "electron-builder": "24.13.3"
+  },
+  "build": {
+    "appId": "io.gameledger.app",
+    "productName": "Game Ledger",
+    "copyright": "Copyright © 2025",
+    "directories": {
+      "output": "../release",
+      "buildResources": "build-assets"
+    },
+    "files": [
+      "main.js",
+      "server-dist/**/*",
+      "node_modules/**/*",
+      "!node_modules/**/{CHANGELOG.md,README.md,readme.md,changelog.md}",
+      "!node_modules/**/test{s,}/**",
+      "!node_modules/**/*.map"
+    ],
+    "extraResources": [
+      {
+        "from": "../client/dist",
+        "to": "client",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis",     "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Game Ledger"
+    },
+    "npmRebuild": false,
+    "nodeGypRebuild": false,
+    "asar": true
+  }
+}
