@@ -6,7 +6,6 @@ import { MathInput } from '@/components/ui/MathInput';
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { Table, Th, Td, Tr } from '@/components/ui/Table';
 import { fmtCurrency } from '@/lib/utils';
 import {
   Plus, CheckCircle, Trash2, ChevronRight, DollarSign, Pencil, ExternalLink,
@@ -33,6 +32,22 @@ const DEFAULT_STANDALONE: StandaloneForm = {
   inputScu: '', outputScu: '', costToRefine: '',
 };
 
+// Each unique quality band for a given material at a station
+type QualityBand = {
+  quality: number | null;
+  totalScu: number;
+  bags: { scu: number; bagLabel: string }[];
+};
+type MatEntry = {
+  totalScu: number;
+  bands: QualityBand[]; // sorted high→low
+};
+type StationEntry = {
+  bags: any[];
+  materials: Record<string, MatEntry>;
+  anchorBagId: number;
+};
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function qualityColor(q: number | null | undefined) {
   if (q == null) return 'text-slate-500';
@@ -44,7 +59,7 @@ function qualityColor(q: number | null | undefined) {
 export function Refining() {
   const qc = useQueryClient();
 
-  // ── Server data ─────────────────────────────────────────────────────────────
+  // ── Server data ──────────────────────────────────────────────────────────────
   const { data: committedBags = [] } = useQuery({
     queryKey: ['committed-bags'],
     queryFn: () => miningApi.getCommitted(),
@@ -65,29 +80,28 @@ export function Refining() {
   const editJob   = useMutation({ mutationFn: ({ id, d }: { id: number; d: unknown }) => miningApi.updateRefining(id, d), onSuccess: invSale });
   const removeJob = useMutation({ mutationFn: (id: number) => miningApi.removeRefining(id), onSuccess: inv });
   const addSale   = useMutation({ mutationFn: (d: unknown) => salesApi.create(d), onSuccess: invSale });
-  const removeSale = useMutation({ mutationFn: (id: number) => salesApi.remove(id), onSuccess: invSale });
 
   // ── UI state ─────────────────────────────────────────────────────────────────
-  // keyed by `${station}||${material}`
+  // Queue form: keyed by `${station}||${material}||${quality ?? 'null'}`
   const [matFormOpen, setMatFormOpen] = useState<Record<string, boolean>>({});
-  const [matForm, setMatForm] = useState<Record<string, MatForm>>({});
+  const [matForm, setMatForm]         = useState<Record<string, MatForm>>({});
   const setMF = (key: string, patch: Partial<MatForm>) =>
     setMatForm(f => ({ ...f, [key]: { ...(f[key] ?? DEFAULT_MAT_FORM), ...patch } }));
 
-  // station collapse
-  const [stationOpen, setStationOpen] = useState<Record<string, boolean>>({});
+  // Collapse state
+  const [stationOpen,  setStationOpen]  = useState<Record<string, boolean>>({});
+  const [materialOpen, setMaterialOpen] = useState<Record<string, boolean>>({});
+  const [activeOpen,   setActiveOpen]   = useState(true);
+  const [doneOpen,     setDoneOpen]     = useState(false); // collapsed by default
 
   const [showStandalone, setShowStandalone] = useState(false);
   const [standaloneForm, setStandaloneForm] = useState<StandaloneForm>(DEFAULT_STANDALONE);
 
-  const [editingJob,  setEditingJob]  = useState<Record<number, any>>({});
-  const [finishForm,  setFinishForm]  = useState<Record<number, { qty: string; eff: string }>>({});
-  const [quickSale,   setQuickSale]   = useState<Record<number, { commodity: string; qty: string; price: string; location: string } | null>>({});
+  const [editingJob, setEditingJob] = useState<Record<number, any>>({});
+  const [finishForm, setFinishForm] = useState<Record<number, { qty: string; eff: string }>>({});
+  const [quickSale,  setQuickSale]  = useState<Record<number, { commodity: string; qty: string; price: string; location: string } | null>>({});
 
-  // ── Derived: bags → station → material breakdown ──────────────────────────
-  type MatEntry = { totalScu: number; lines: { scu: number; quality: number | null; bagLabel: string }[] };
-  type StationEntry = { bags: any[]; materials: Record<string, MatEntry>; anchorBagId: number };
-
+  // ── Derived: bags → station → material → quality bands ──────────────────────
   const stationData: Record<string, StationEntry> = {};
   for (const bag of committedBags as any[]) {
     const loc = bag.committed_location || 'Unknown Station';
@@ -95,16 +109,32 @@ export function Refining() {
     stationData[loc].bags.push(bag);
     for (const line of (bag.lines || []).filter((l: any) => !l.is_inert)) {
       const mat: string = line.material;
-      if (!stationData[loc].materials[mat]) stationData[loc].materials[mat] = { totalScu: 0, lines: [] };
-      stationData[loc].materials[mat].totalScu += Number(line.scu) || 0;
-      stationData[loc].materials[mat].lines.push({ scu: Number(line.scu), quality: line.quality ?? null, bagLabel: bag.label });
+      const qual: number | null = line.quality ?? null;
+      if (!stationData[loc].materials[mat]) {
+        stationData[loc].materials[mat] = { totalScu: 0, bands: [] };
+      }
+      const entry = stationData[loc].materials[mat];
+      entry.totalScu += Number(line.scu) || 0;
+      let band = entry.bands.find(b => b.quality === qual);
+      if (!band) {
+        band = { quality: qual, totalScu: 0, bags: [] };
+        entry.bands.push(band);
+      }
+      band.totalScu += Number(line.scu) || 0;
+      band.bags.push({ scu: Number(line.scu), bagLabel: bag.label });
+    }
+  }
+  // Sort quality bands high→low
+  for (const sd of Object.values(stationData)) {
+    for (const mat of Object.values(sd.materials)) {
+      mat.bands.sort((a, b) => (b.quality ?? 0) - (a.quality ?? 0));
     }
   }
 
-  const jobs = allJobs as any[];
-  const pendingJobs = jobs.filter(j => j.status !== 'done');
-  const doneJobs    = jobs.filter(j => j.status === 'done');
-  const currency    = jobs.find(j => j.currency)?.currency || 'UEC';
+  const jobs         = allJobs as any[];
+  const pendingJobs  = jobs.filter(j => j.status !== 'done');
+  const doneJobs     = jobs.filter(j => j.status === 'done');
+  const currency     = jobs.find(j => j.currency)?.currency || 'UEC';
   const totalPending = pendingJobs.reduce((s, j) => s + (j.cost_to_refine || 0), 0);
   const totalEarned  = doneJobs.reduce((s, j) => s + (j.sale_revenue || 0), 0);
 
@@ -121,27 +151,27 @@ export function Refining() {
         {editing ? (
           <div className="px-1 space-y-2">
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {[
-                ['Output material', 'output_material', 'input'],
-                ['Station / refinery', 'refinery_name', 'input'],
-                ['Method', 'refinery_method', 'input'],
-              ].map(([label, field]) => (
+              {([
+                ['Output material', 'output_material'],
+                ['Station / refinery', 'refinery_name'],
+                ['Method', 'refinery_method'],
+              ] as [string, string][]).map(([label, field]) => (
                 <div key={field}>
                   <p className="text-xs text-slate-500 mb-1">{label}</p>
-                  <input value={editing[field] || ''} placeholder={label as string}
+                  <input value={editing[field] || ''} placeholder={label}
                     onChange={e => setEditingJob(f => ({ ...f, [rj.id]: { ...f[rj.id], [field]: e.target.value } }))} />
                 </div>
               ))}
-              {[
+              {([
                 ['Input SCU', 'input_quantity'],
                 ['Output SCU', 'output_quantity'],
                 ['Refining cost', 'cost_to_refine'],
-              ].map(([label, field]) => (
+              ] as [string, string][]).map(([label, field]) => (
                 <div key={field}>
                   <p className="text-xs text-slate-500 mb-1">{label}</p>
                   <MathInput
                     value={editing[field] != null ? String(editing[field]) : ''}
-                    placeholder={label as string}
+                    placeholder={label}
                     onChange={e => setEditingJob(f => ({ ...f, [rj.id]: { ...f[rj.id], [field]: e.target.value } }))}
                   />
                 </div>
@@ -154,7 +184,8 @@ export function Refining() {
                   refineryName:   editing.refinery_name   || undefined,
                   refineryMethod: editing.refinery_method || undefined,
                   inputQuantity:  Number(editing.input_quantity),
-                  outputQuantity: editing.output_quantity !== '' && editing.output_quantity != null ? Number(editing.output_quantity) : undefined,
+                  outputQuantity: editing.output_quantity !== '' && editing.output_quantity != null
+                    ? Number(editing.output_quantity) : undefined,
                   costToRefine:   Number(editing.cost_to_refine) || 0,
                 }});
                 setEditingJob(f => { const n = { ...f }; delete n[rj.id]; return n; });
@@ -207,14 +238,23 @@ export function Refining() {
                   <Button size="sm" variant="secondary" onClick={() => {
                     const ff = finishForm[rj.id];
                     if (!ff?.qty) return;
-                    editJob.mutate({ id: rj.id, d: { outputQuantity: Number(ff.qty), efficiency: ff.eff ? Number(ff.eff) : undefined, status: 'done', completedAt: new Date().toISOString() } });
+                    editJob.mutate({ id: rj.id, d: {
+                      outputQuantity: Number(ff.qty),
+                      efficiency: ff.eff ? Number(ff.eff) : undefined,
+                      status: 'done',
+                      completedAt: new Date().toISOString(),
+                    }});
                     setFinishForm(f => { const n = { ...f }; delete n[rj.id]; return n; });
                   }}><CheckCircle size={12} /> Done</Button>
                 </>
               )}
               {needsSale && (
                 <Button size="sm" variant="secondary" onClick={() =>
-                  setQuickSale(f => ({ ...f, [rj.id]: { commodity: rj.output_material || '', qty: String(rj.output_quantity ?? ''), price: '', location: '' } }))}>
+                  setQuickSale(f => ({ ...f, [rj.id]: {
+                    commodity: rj.output_material || '',
+                    qty: String(rj.output_quantity ?? ''),
+                    price: '', location: '',
+                  }}))}>
                   <DollarSign size={12} /> Sell
                 </Button>
               )}
@@ -256,10 +296,17 @@ export function Refining() {
               <div className="flex gap-1.5 pb-0.5">
                 <Button size="sm" onClick={() => {
                   if (!qs.commodity || !qs.qty || !qs.price) return;
-                  addSale.mutate({ refiningJobId: rj.id, commodity: qs.commodity, quantitySold: Number(qs.qty), pricePerUnit: Number(qs.price), location: qs.location || undefined });
+                  addSale.mutate({
+                    refiningJobId: rj.id,
+                    commodity: qs.commodity,
+                    quantitySold: Number(qs.qty),
+                    pricePerUnit: Number(qs.price),
+                    location: qs.location || undefined,
+                  });
                   setQuickSale(f => ({ ...f, [rj.id]: null }));
                 }}><CheckCircle size={12} /> Save</Button>
-                <Button size="sm" variant="secondary" onClick={() => setQuickSale(f => ({ ...f, [rj.id]: null }))}>Cancel</Button>
+                <Button size="sm" variant="secondary"
+                  onClick={() => setQuickSale(f => ({ ...f, [rj.id]: null }))}>Cancel</Button>
               </div>
             </div>
           </div>
@@ -276,7 +323,7 @@ export function Refining() {
         <p className="text-sm text-slate-500 mt-0.5">Process mined ore into refined materials</p>
       </div>
 
-      {/* Stats */}
+      {/* Stats strip */}
       {jobs.length > 0 && (
         <div className="flex gap-3 flex-wrap">
           <div className="rounded-xl border border-[#1e2d4f] bg-[#141c35] px-4 py-3">
@@ -294,7 +341,7 @@ export function Refining() {
         </div>
       )}
 
-      {/* ── Queue from committed bags — grouped by station → material ── */}
+      {/* ── Queue from committed bags: station → material → quality band ── */}
       {Object.keys(stationData).length > 0 && (
         <Card>
           <CardHeader>
@@ -304,150 +351,149 @@ export function Refining() {
 
           <div className="divide-y divide-slate-700/40">
             {Object.entries(stationData).map(([station, sd]) => {
-              const isStationOpen = stationOpen[station] ?? true;
-              const totalStationScu = Object.values(sd.materials).reduce((s, m) => s + m.totalScu, 0);
+              const isStationOpen    = stationOpen[station] ?? true;
+              const totalStationScu  = Object.values(sd.materials).reduce((s, m) => s + m.totalScu, 0);
+              const matCount         = Object.keys(sd.materials).length;
 
               return (
                 <div key={station} className="py-3 first:pt-0 last:pb-0">
-                  {/* Station header */}
+                  {/* Station header — collapsible */}
                   <button
                     onClick={() => setStationOpen(f => ({ ...f, [station]: !isStationOpen }))}
-                    className="flex items-center gap-2 w-full text-left group"
+                    className="flex items-center gap-2 w-full text-left"
                   >
                     <ChevronRight size={13} className={`shrink-0 text-slate-500 transition-transform duration-150 ${isStationOpen ? 'rotate-90' : ''}`} />
                     <span className="font-bold text-slate-100 text-sm">{station}</span>
                     <span className="text-xs text-slate-500">{sd.bags.length} bag{sd.bags.length !== 1 ? 's' : ''}</span>
-                    <span className="text-xs text-orange-400 font-medium">{totalStationScu.toFixed(2)} SCU total</span>
-                    <span className="text-xs text-slate-600">{Object.keys(sd.materials).join(' · ')}</span>
+                    <span className="text-xs text-orange-400 font-medium">{totalStationScu.toFixed(2)} SCU</span>
+                    <span className="text-xs text-slate-600">{matCount} material{matCount !== 1 ? 's' : ''}</span>
                   </button>
 
                   {isStationOpen && (
-                    <div className="mt-3 ml-5 space-y-4">
+                    <div className="mt-3 ml-5 space-y-2">
                       {Object.entries(sd.materials).map(([material, matData]) => {
-                        const formKey = `${station}||${material}`;
-                        const isFormOpen = matFormOpen[formKey] ?? false;
-                        const mf = matForm[formKey] ?? DEFAULT_MAT_FORM;
-
-                        // Sort quality lines high→low for display
-                        const sortedLines = [...matData.lines].sort((a, b) => (b.quality ?? 0) - (a.quality ?? 0));
+                        const matKey    = `${station}||${material}`;
+                        const isMatOpen = materialOpen[matKey] ?? true;
 
                         return (
                           <div key={material} className="border border-slate-700/50 rounded-lg overflow-hidden">
-                            {/* Material header row */}
-                            <div className="flex items-center gap-3 px-3 py-2 bg-slate-800/40">
-                              <div className="flex-1 min-w-0">
-                                <span className="font-semibold text-slate-200 text-sm">{material}</span>
-                                <span className="ml-2 text-xs text-orange-400 font-medium">{matData.totalScu.toFixed(2)} SCU</span>
-                                <span className="ml-2 text-xs text-slate-500">{matData.lines.length} deposit{matData.lines.length !== 1 ? 's' : ''}</span>
-                              </div>
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                onClick={() => {
-                                  setMatFormOpen(f => ({ ...f, [formKey]: !isFormOpen }));
-                                  // Pre-fill input SCU with total
-                                  if (!isFormOpen) {
-                                    setMatForm(f => ({
-                                      ...f,
-                                      [formKey]: {
-                                        ...(f[formKey] ?? DEFAULT_MAT_FORM),
-                                        outputMaterial: material,
-                                        inputScu: matData.totalScu.toFixed(2),
-                                      },
-                                    }));
-                                  }
-                                }}
-                              >
-                                {isFormOpen ? 'Cancel' : <><Plus size={11} /> Queue Job</>}
-                              </Button>
-                            </div>
+                            {/* Material header — collapsible */}
+                            <button
+                              onClick={() => setMaterialOpen(f => ({ ...f, [matKey]: !isMatOpen }))}
+                              className="flex items-center gap-2 w-full text-left px-3 py-2 bg-slate-800/40 hover:bg-slate-800/60 transition-colors"
+                            >
+                              <ChevronRight size={12} className={`shrink-0 text-slate-600 transition-transform duration-150 ${isMatOpen ? 'rotate-90' : ''}`} />
+                              <span className="font-semibold text-slate-200 text-sm flex-1 text-left">{material}</span>
+                              <span className="text-xs text-orange-400 font-medium">{matData.totalScu.toFixed(2)} SCU</span>
+                              <span className="text-xs text-slate-600 ml-2">
+                                {matData.bands.length} quality band{matData.bands.length !== 1 ? 's' : ''}
+                              </span>
+                            </button>
 
-                            {/* Quality breakdown table */}
-                            <div className="px-3 pb-2 pt-1">
-                              <table className="w-full text-xs">
-                                <thead>
-                                  <tr className="text-slate-600 uppercase tracking-wider">
-                                    <th className="text-left py-1 font-medium">Bag</th>
-                                    <th className="text-right py-1 font-medium">Quality</th>
-                                    <th className="text-right py-1 font-medium">SCU</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {sortedLines.map((line, i) => (
-                                    <tr key={i} className="border-t border-slate-800">
-                                      <td className="py-1 text-slate-500">{line.bagLabel}</td>
-                                      <td className={`py-1 text-right font-mono ${qualityColor(line.quality)}`}>
-                                        {line.quality != null ? line.quality : '—'}
-                                      </td>
-                                      <td className="py-1 text-right text-slate-300">{line.scu.toFixed(2)}</td>
-                                    </tr>
-                                  ))}
-                                  {matData.lines.length > 1 && (
-                                    <tr className="border-t border-slate-700">
-                                      <td className="py-1 text-slate-600 font-medium">Total</td>
-                                      <td />
-                                      <td className="py-1 text-right text-orange-400 font-semibold">{matData.totalScu.toFixed(2)}</td>
-                                    </tr>
-                                  )}
-                                </tbody>
-                              </table>
-                            </div>
+                            {/* Quality bands — one row per distinct quality */}
+                            {isMatOpen && (
+                              <div className="divide-y divide-slate-800/60">
+                                {matData.bands.map((band) => {
+                                  const qLabel  = band.quality != null ? String(band.quality) : 'null';
+                                  const formKey = `${station}||${material}||${qLabel}`;
+                                  const isFormOpen = matFormOpen[formKey] ?? false;
+                                  const mf         = matForm[formKey] ?? DEFAULT_MAT_FORM;
 
-                            {/* Queue job form (inline, beneath quality table) */}
-                            {isFormOpen && (
-                              <div className="px-3 pb-3 pt-1 border-t border-slate-700/50 bg-slate-900/30">
-                                <p className="text-xs text-slate-500 mb-2 font-medium">Refining job details</p>
-                                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                                  <div>
-                                    <p className="text-xs text-slate-600 mb-0.5">Output material</p>
-                                    <input value={mf.outputMaterial} placeholder={material}
-                                      onChange={e => setMF(formKey, { outputMaterial: e.target.value })} />
-                                  </div>
-                                  <div>
-                                    <p className="text-xs text-slate-600 mb-0.5">Method (e.g. Dinyx)</p>
-                                    <input value={mf.refineryMethod} placeholder="Select method"
-                                      onChange={e => setMF(formKey, { refineryMethod: e.target.value })} />
-                                  </div>
-                                  <div>
-                                    <p className="text-xs text-slate-600 mb-0.5">Input SCU</p>
-                                    <MathInput value={mf.inputScu} placeholder={matData.totalScu.toFixed(2)}
-                                      onChange={e => setMF(formKey, { inputScu: e.target.value })} />
-                                  </div>
-                                  <div>
-                                    <p className="text-xs text-slate-600 mb-0.5">Expected output SCU</p>
-                                    <MathInput value={mf.outputScu} placeholder="—"
-                                      onChange={e => setMF(formKey, { outputScu: e.target.value })} />
-                                  </div>
-                                  <div>
-                                    <p className="text-xs text-slate-600 mb-0.5">Refining cost</p>
-                                    <MathInput value={mf.costToRefine} placeholder="0"
-                                      onChange={e => setMF(formKey, { costToRefine: e.target.value })} />
-                                  </div>
-                                  <div className="flex items-end">
-                                    <Button
-                                      size="sm"
-                                      className="w-full"
-                                      onClick={() => {
-                                        const inputQty = mf.inputScu ? Number(mf.inputScu) : matData.totalScu;
-                                        const outMat   = mf.outputMaterial || material;
-                                        if (!outMat || !inputQty) return;
-                                        addJob.mutate({
-                                          bagId:          sd.anchorBagId,
-                                          inputQuantity:  inputQty,
-                                          outputMaterial: outMat,
-                                          outputQuantity: mf.outputScu ? Number(mf.outputScu) : undefined,
-                                          refineryName:   station,
-                                          refineryMethod: mf.refineryMethod || undefined,
-                                          costToRefine:   Number(mf.costToRefine) || 0,
-                                        });
-                                        setMatFormOpen(f => ({ ...f, [formKey]: false }));
-                                        setMatForm(f => ({ ...f, [formKey]: DEFAULT_MAT_FORM }));
-                                      }}
-                                    >
-                                      <Plus size={13} /> Queue
-                                    </Button>
-                                  </div>
-                                </div>
+                                  return (
+                                    <div key={qLabel} className="px-3 py-2">
+                                      {/* Band summary row */}
+                                      <div className="flex items-center gap-3">
+                                        <span className={`font-mono text-sm font-bold w-12 text-right ${qualityColor(band.quality)}`}>
+                                          {band.quality != null ? band.quality : '—'}
+                                        </span>
+                                        <span className="text-xs text-slate-500 w-12">quality</span>
+                                        <span className="text-xs text-orange-300 font-semibold flex-1">
+                                          {band.totalScu.toFixed(2)} SCU
+                                        </span>
+                                        <span className="text-xs text-slate-600 truncate max-w-[180px]">
+                                          {band.bags.map(b => b.bagLabel).join(' · ')}
+                                        </span>
+                                        <Button
+                                          size="sm"
+                                          variant="secondary"
+                                          onClick={() => {
+                                            const opening = !isFormOpen;
+                                            setMatFormOpen(f => ({ ...f, [formKey]: opening }));
+                                            if (opening) {
+                                              setMatForm(f => ({
+                                                ...f,
+                                                [formKey]: {
+                                                  ...(f[formKey] ?? DEFAULT_MAT_FORM),
+                                                  outputMaterial: material,
+                                                  inputScu: band.totalScu.toFixed(2),
+                                                },
+                                              }));
+                                            }
+                                          }}
+                                        >
+                                          {isFormOpen ? 'Cancel' : <><Plus size={11} /> Queue</>}
+                                        </Button>
+                                      </div>
+
+                                      {/* Inline queue form */}
+                                      {isFormOpen && (
+                                        <div className="mt-2 pt-2 border-t border-slate-700/40 rounded-md px-1 pb-1">
+                                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                                            <div>
+                                              <p className="text-xs text-slate-600 mb-0.5">Output material</p>
+                                              <input value={mf.outputMaterial} placeholder={material}
+                                                onChange={e => setMF(formKey, { outputMaterial: e.target.value })} />
+                                            </div>
+                                            <div>
+                                              <p className="text-xs text-slate-600 mb-0.5">Method</p>
+                                              <input value={mf.refineryMethod} placeholder="e.g. Dinyx"
+                                                onChange={e => setMF(formKey, { refineryMethod: e.target.value })} />
+                                            </div>
+                                            <div>
+                                              <p className="text-xs text-slate-600 mb-0.5">Input SCU</p>
+                                              <MathInput value={mf.inputScu} placeholder={band.totalScu.toFixed(2)}
+                                                onChange={e => setMF(formKey, { inputScu: e.target.value })} />
+                                            </div>
+                                            <div>
+                                              <p className="text-xs text-slate-600 mb-0.5">Expected out SCU</p>
+                                              <MathInput value={mf.outputScu} placeholder="—"
+                                                onChange={e => setMF(formKey, { outputScu: e.target.value })} />
+                                            </div>
+                                            <div>
+                                              <p className="text-xs text-slate-600 mb-0.5">Refining cost</p>
+                                              <MathInput value={mf.costToRefine} placeholder="0"
+                                                onChange={e => setMF(formKey, { costToRefine: e.target.value })} />
+                                            </div>
+                                            <div className="flex items-end">
+                                              <Button
+                                                size="sm"
+                                                className="w-full"
+                                                onClick={() => {
+                                                  const inputQty = mf.inputScu ? Number(mf.inputScu) : band.totalScu;
+                                                  const outMat   = mf.outputMaterial || material;
+                                                  if (!outMat || !inputQty) return;
+                                                  addJob.mutate({
+                                                    bagId:          sd.anchorBagId,
+                                                    inputQuantity:  inputQty,
+                                                    outputMaterial: outMat,
+                                                    outputQuantity: mf.outputScu ? Number(mf.outputScu) : undefined,
+                                                    refineryName:   station,
+                                                    refineryMethod: mf.refineryMethod || undefined,
+                                                    costToRefine:   Number(mf.costToRefine) || 0,
+                                                  });
+                                                  setMatFormOpen(f => ({ ...f, [formKey]: false }));
+                                                  setMatForm(f => ({ ...f, [formKey]: DEFAULT_MAT_FORM }));
+                                                }}
+                                              >
+                                                <Plus size={13} /> Queue
+                                              </Button>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
                               </div>
                             )}
                           </div>
@@ -462,7 +508,7 @@ export function Refining() {
         </Card>
       )}
 
-      {/* ── Standalone job ── */}
+      {/* ── Standalone job — collapsible ── */}
       <Card>
         <button
           className="flex items-center gap-2 w-full text-left"
@@ -521,19 +567,37 @@ export function Refining() {
         )}
       </Card>
 
-      {/* ── Active jobs ── */}
+      {/* ── Active jobs — collapsible, open by default ── */}
       {pendingJobs.length > 0 && (
         <Card>
-          <CardHeader><CardTitle>Active Jobs ({pendingJobs.length})</CardTitle></CardHeader>
-          <div>{pendingJobs.map(renderJob)}</div>
+          <button
+            className="flex items-center gap-2 w-full text-left"
+            onClick={() => setActiveOpen(v => !v)}
+          >
+            <ChevronRight size={13} className={`text-slate-500 transition-transform duration-150 ${activeOpen ? 'rotate-90' : ''}`} />
+            <CardTitle>Active Jobs ({pendingJobs.length})</CardTitle>
+            {totalPending > 0 && (
+              <span className="text-xs text-red-400 ml-1">{fmtCurrency(totalPending, currency)} outstanding</span>
+            )}
+          </button>
+          {activeOpen && <div className="mt-2">{pendingJobs.map(renderJob)}</div>}
         </Card>
       )}
 
-      {/* ── Completed jobs ── */}
+      {/* ── Completed jobs — collapsible, closed by default ── */}
       {doneJobs.length > 0 && (
         <Card>
-          <CardHeader><CardTitle>Completed ({doneJobs.length})</CardTitle></CardHeader>
-          <div className="opacity-80">{doneJobs.map(renderJob)}</div>
+          <button
+            className="flex items-center gap-2 w-full text-left"
+            onClick={() => setDoneOpen(v => !v)}
+          >
+            <ChevronRight size={13} className={`text-slate-500 transition-transform duration-150 ${doneOpen ? 'rotate-90' : ''}`} />
+            <CardTitle>Completed ({doneJobs.length})</CardTitle>
+            {totalEarned > 0 && (
+              <span className="text-xs text-emerald-400 ml-1">{fmtCurrency(totalEarned, currency)} earned</span>
+            )}
+          </button>
+          {doneOpen && <div className="mt-2 opacity-80">{doneJobs.map(renderJob)}</div>}
         </Card>
       )}
 
