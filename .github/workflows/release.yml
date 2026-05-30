@@ -20,16 +20,16 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Install root deps (sharp for icon generation)
-        run: npm install
+      - name: Install root deps
+        run: npm install --ignore-scripts
 
       - name: Install client deps
         working-directory: client
-        run: npm install
+        run: npm install --ignore-scripts
 
       - name: Install server deps
         working-directory: server
-        run: npm install
+        run: npm install --ignore-scripts
 
       - name: Generate icons
         run: npm run icons
@@ -45,7 +45,7 @@ jobs:
 
       - name: Install electron deps
         working-directory: electron
-        run: npm install
+        run: npm install --ignore-scripts
 
       - name: Build Windows installers
         working-directory: electron
@@ -99,15 +99,15 @@ jobs:
           sudo apt-get install -y rpm fakeroot dpkg
 
       - name: Install root deps
-        run: npm install
+        run: npm install --ignore-scripts
 
       - name: Install client deps
         working-directory: client
-        run: npm install
+        run: npm install --ignore-scripts
 
       - name: Install server deps
         working-directory: server
-        run: npm install
+        run: npm install --ignore-scripts
 
       - name: Generate icons
         run: npm run icons
@@ -123,7 +123,7 @@ jobs:
 
       - name: Install electron deps
         working-directory: electron
-        run: npm install
+        run: npm install --ignore-scripts
 
       - name: Build Linux packages
         working-directory: electron
@@ -150,15 +150,15 @@ jobs:
           node-version: '22'
 
       - name: Install root deps
-        run: npm install
+        run: npm install --ignore-scripts
 
       - name: Install client deps
         working-directory: client
-        run: npm install
+        run: npm install --ignore-scripts
 
       - name: Install server deps
         working-directory: server
-        run: npm install
+        run: npm install --ignore-scripts
 
       - name: Generate icons
         run: npm run icons
@@ -174,7 +174,7 @@ jobs:
 
       - name: Install electron deps
         working-directory: electron
-        run: npm install
+        run: npm install --ignore-scripts
 
       - name: Build macOS DMG
         working-directory: electron
