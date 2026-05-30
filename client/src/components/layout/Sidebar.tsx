@@ -77,7 +77,7 @@ export function Sidebar() {
 
       {/* Footer: version + GitHub link */}
       <div className="px-4 py-3 border-t border-[#1e2d4f] flex items-center justify-between">
-        <p className="text-xs text-slate-600">v1.0.0 · local only</p>
+        <p className="text-xs text-slate-600">v{import.meta.env.VITE_APP_VERSION} · local only</p>
         <a
           href={GITHUB_URL}
           target="_blank"

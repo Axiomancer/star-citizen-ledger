@@ -1,4 +1,4 @@
-name: Release
+﻿name: Release
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  # ── Windows: NSIS installer + portable .exe ───────────────────────────────
+  # â”€â”€ Windows: NSIS installer + portable .exe â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   build-windows:
     name: Windows
     runs-on: windows-latest
@@ -21,15 +21,15 @@ jobs:
           node-version: '22'
 
       - name: Install root deps (sharp for icon generation)
-        run: npm install
+        run: npm install --ignore-scripts
 
       - name: Install client deps
         working-directory: client
-        run: npm install
+        run: npm install --ignore-scripts
 
       - name: Install server deps
         working-directory: server
-        run: npm install
+        run: npm install --ignore-scripts
 
       - name: Generate icons
         run: npm run icons
@@ -45,7 +45,7 @@ jobs:
 
       - name: Install electron deps
         working-directory: electron
-        run: npm install
+        run: npm install --ignore-scripts
 
       - name: Build Windows installers
         working-directory: electron
@@ -65,10 +65,10 @@ jobs:
             ### Downloads
             | File | Platform |
             |---|---|
-            | `*-Setup-x64.exe` | Windows 10/11 — installer with Start Menu + Desktop shortcut |
-            | `*-Portable-x64.exe` | Windows 10/11 — no install needed |
-            | `*-x64.AppImage` | Linux x64 — `chmod +x` then run |
-            | `*-x64.deb` | Ubuntu / Debian — `sudo dpkg -i *.deb` |
+            | `*-Setup-x64.exe` | Windows 10/11 â€” installer with Start Menu + Desktop shortcut |
+            | `*-Portable-x64.exe` | Windows 10/11 â€” no install needed |
+            | `*-x64.AppImage` | Linux x64 â€” `chmod +x` then run |
+            | `*-x64.deb` | Ubuntu / Debian â€” `sudo dpkg -i *.deb` |
             | `*-x64.dmg` | macOS Intel |
             | `*-arm64.dmg` | macOS Apple Silicon |
 
@@ -79,10 +79,10 @@ jobs:
             - **macOS**: `~/Library/Application Support/star-citizen-ledger/data/`
 
             ### Security note
-            These builds are not code-signed. Windows SmartScreen will warn on first run — click "More info → Run anyway". See [VirusTotal results](https://github.com/Axiomancer/star-citizen-ledger#virus-scan-results-v100) in the README.
+            These builds are not code-signed. Windows SmartScreen will warn on first run â€” click "More info â†’ Run anyway". See [VirusTotal results](https://github.com/Axiomancer/star-citizen-ledger#virus-scan-results-v100) in the README.
           files: release/**/*.exe
 
-  # ── Linux: AppImage + .deb ────────────────────────────────────────────────
+  # â”€â”€ Linux: AppImage + .deb â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   build-linux:
     name: Linux
     runs-on: ubuntu-latest
@@ -99,15 +99,15 @@ jobs:
           sudo apt-get install -y rpm fakeroot dpkg
 
       - name: Install root deps
-        run: npm install
+        run: npm install --ignore-scripts
 
       - name: Install client deps
         working-directory: client
-        run: npm install
+        run: npm install --ignore-scripts
 
       - name: Install server deps
         working-directory: server
-        run: npm install
+        run: npm install --ignore-scripts
 
       - name: Generate icons
         run: npm run icons
@@ -123,7 +123,7 @@ jobs:
 
       - name: Install electron deps
         working-directory: electron
-        run: npm install
+        run: npm install --ignore-scripts
 
       - name: Build Linux packages
         working-directory: electron
@@ -138,7 +138,7 @@ jobs:
             release/**/*.AppImage
             release/**/*.deb
 
-  # ── macOS: DMG (Intel + Apple Silicon) ───────────────────────────────────
+  # â”€â”€ macOS: DMG (Intel + Apple Silicon) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   build-mac:
     name: macOS
     runs-on: macos-latest
@@ -150,15 +150,15 @@ jobs:
           node-version: '22'
 
       - name: Install root deps
-        run: npm install
+        run: npm install --ignore-scripts
 
       - name: Install client deps
         working-directory: client
-        run: npm install
+        run: npm install --ignore-scripts
 
       - name: Install server deps
         working-directory: server
-        run: npm install
+        run: npm install --ignore-scripts
 
       - name: Generate icons
         run: npm run icons
@@ -174,7 +174,7 @@ jobs:
 
       - name: Install electron deps
         working-directory: electron
-        run: npm install
+        run: npm install --ignore-scripts
 
       - name: Build macOS DMG
         working-directory: electron
