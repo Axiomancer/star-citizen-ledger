@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { routeError } from '../lib/routeError';
 import { db } from '../db';
-import { inventoryIn } from '../lib/inventory';
+import { inventoryIn, inventoryOut } from '../lib/inventory';
 
 const router = Router();
 
@@ -255,6 +255,31 @@ router.post('/refining/sessions', async (req, res) => {
          line.inputQuantity, line.outputMaterial,
          line.expectedOutputQty ?? null]
       );
+    }
+
+    // Deduct inventory-sourced inputs (e.g. salvaged Construction Materials refined
+    // from your stockpile). Mining ore lives in bags (removed below); salvage/inventory
+    // material is already stocked, so pulling it into a refinery job must remove it now.
+    const invLines = (lines as any[]).filter(
+      (l: any) => l.fromInventory && l.inputMaterial && Number(l.inputQuantity) > 0
+    );
+    if (invLines.length > 0) {
+      let dedGameId: number | null = gameId ?? null;
+      if (!dedGameId) {
+        const g = await db.get('SELECT id FROM games ORDER BY id LIMIT 1');
+        dedGameId = g?.id ?? null;
+      }
+      if (dedGameId) {
+        for (const l of invLines) {
+          await inventoryOut(
+            dedGameId,
+            l.inputMaterial,
+            Number(l.inputQuantity),
+            null,
+            `Refining input: ${l.inputMaterial}`,
+          );
+        }
+      }
     }
 
     // Remove consumed ore lines from mining bags
