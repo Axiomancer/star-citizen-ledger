@@ -192,6 +192,7 @@ export function Refining() {
   const [completing,   setCompleting]   = useState<Record<number, boolean>>({});
   const [actualOut,    setActualOut]    = useState<Record<number, Record<number, string>>>({}); // [sid][lid]
   const [editingSess,  setEditingSess]  = useState<Record<number, any>>({});
+  const [editingLn,    setEditingLn]    = useState<Record<number, { output_material: string; input_quantity: string; output_quantity: string } | null>>({});
   const [quickSaleLn,  setQuickSaleLn]  = useState<Record<number, { commodity: string; qty: string; price: string; location: string } | null>>({});
 
   // ── Derived: committed bags → station → material → quality bands ─────────────
@@ -378,6 +379,7 @@ export function Refining() {
               <tbody>
                 {lines.map((line: any) => {
                   const qs = quickSaleLn[line.id];
+                  const el = editingLn[line.id];
                   return (
                     <>
                       <tr key={line.id} className="border-t border-slate-800">
@@ -398,8 +400,24 @@ export function Refining() {
                               }))}
                             />
                           ) : (
-                            <span className={line.output_quantity != null ? 'text-emerald-400' : 'text-slate-600'}>
-                              {line.output_quantity != null ? `${line.output_quantity} SCU` : '—'}
+                            <span className="inline-flex items-center gap-1.5 justify-end">
+                              <span className={line.output_quantity != null ? 'text-emerald-400' : 'text-slate-600'}>
+                                {line.output_quantity != null ? `${line.output_quantity} SCU` : '—'}
+                              </span>
+                              <button
+                                title="Edit line"
+                                className="text-slate-600 hover:text-slate-300"
+                                onClick={() => setEditingLn(f => ({
+                                  ...f,
+                                  [line.id]: {
+                                    output_material: line.output_material || '',
+                                    input_quantity:  line.input_quantity != null ? String(line.input_quantity) : '',
+                                    output_quantity: line.output_quantity != null ? String(line.output_quantity) : '',
+                                  },
+                                }))}
+                              >
+                                <Pencil size={10} />
+                              </button>
                             </span>
                           )}
                         </td>
@@ -420,6 +438,41 @@ export function Refining() {
                           </td>
                         )}
                       </tr>
+                      {/* Inline line editor */}
+                      {el && (
+                        <tr key={`edit-${line.id}`}>
+                          <td colSpan={isDone ? 5 : 4} className="pb-2 pt-1">
+                            <div className="flex gap-2 flex-wrap items-end p-2 bg-slate-800/50 rounded-lg border border-slate-700/40">
+                              <div className="flex-1 min-w-[140px]">
+                                <p className="text-xs text-slate-500 mb-0.5">Output material</p>
+                                <input value={el.output_material}
+                                  onChange={e => setEditingLn(f => ({ ...f, [line.id]: { ...f[line.id]!, output_material: e.target.value } }))} />
+                              </div>
+                              <div className="w-24">
+                                <p className="text-xs text-slate-500 mb-0.5">In SCU</p>
+                                <MathInput value={el.input_quantity}
+                                  onChange={e => setEditingLn(f => ({ ...f, [line.id]: { ...f[line.id]!, input_quantity: e.target.value } }))} />
+                              </div>
+                              <div className="w-24">
+                                <p className="text-xs text-slate-500 mb-0.5">{isDone ? 'Actual out' : 'Expected out'} SCU</p>
+                                <MathInput value={el.output_quantity}
+                                  onChange={e => setEditingLn(f => ({ ...f, [line.id]: { ...f[line.id]!, output_quantity: e.target.value } }))} />
+                              </div>
+                              <div className="flex gap-1.5 pb-0.5">
+                                <Button size="sm" onClick={() => {
+                                  updateLine.mutate({ sid: s.id, lid: line.id, d: {
+                                    outputMaterial: el.output_material || undefined,
+                                    inputQuantity:  el.input_quantity  !== '' ? Number(el.input_quantity)  : undefined,
+                                    outputQuantity: el.output_quantity !== '' ? Number(el.output_quantity) : undefined,
+                                  }});
+                                  setEditingLn(f => ({ ...f, [line.id]: null }));
+                                }}><CheckCircle size={12} /> Save</Button>
+                                <Button size="sm" variant="secondary" onClick={() => setEditingLn(f => ({ ...f, [line.id]: null }))}>✕</Button>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
                       {/* Quick sale for this line */}
                       {qs && (
                         <tr key={`qs-${line.id}`}>
@@ -472,6 +525,7 @@ export function Refining() {
                     const val = outputs[line.id];
                     return updateLine.mutateAsync({ sid: s.id, lid: line.id, d: {
                       outputQuantity: val ? Number(val) : undefined,
+                      status: 'done',
                     }});
                   })).then(() => {
                     updateSession.mutate({ id: s.id, d: { status: 'done' } });

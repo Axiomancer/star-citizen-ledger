@@ -374,18 +374,22 @@ router.delete('/refining/sessions/:id', async (req, res) => {
   } catch (e: unknown) { routeError(res, e); }
 });
 
-// Update individual line's actual output when completing a session
+// Update an individual line — input/output/material editable any time.
+// status is only changed when explicitly passed (e.g. 'done' from the
+// complete flow); plain edits must NOT silently mark the line done.
 router.put('/refining/sessions/:sid/lines/:lid', async (req, res) => {
-  const { outputQuantity, outputMaterial, efficiency } = req.body;
+  const { inputQuantity, outputQuantity, outputMaterial, efficiency, status } = req.body;
   try {
     await db.run(`
       UPDATE refining_jobs SET
+        input_quantity  = COALESCE(?, input_quantity),
         output_quantity = COALESCE(?, output_quantity),
         output_material = COALESCE(?, output_material),
         efficiency      = COALESCE(?, efficiency),
-        status          = 'done'
+        status          = COALESCE(?, status)
       WHERE id = ? AND session_id = ?
-    `, [outputQuantity ?? null, outputMaterial ?? null, efficiency ?? null,
+    `, [inputQuantity ?? null, outputQuantity ?? null, outputMaterial ?? null,
+        efficiency ?? null, status ?? null,
         req.params.lid, req.params.sid]);
     res.json({ ok: true });
   } catch (e: unknown) { routeError(res, e); }
